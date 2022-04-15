@@ -17,11 +17,29 @@ if(origin[origin.length - 1] !== `/`) {
 	origin += `/`
 }
 
-// Check for webp support
-let useWebp = process.env.WEBP || true
-if(useWebp === `no` || useWebp === `false` || useWebp === `0`){
-	useWebp = false
+function toBool(str){
+	const type = typeof str
+	if(type === `boolean`) {
+		return str
+	}
+	if(type === `string`) {
+		if(
+			str === `true` ||
+			str === `yes` ||
+			str === `on` ||
+			str === `1`
+		) {
+			return true
+		}
+		return false
+	}
+	return !!str
 }
+
+// Check for feature flags
+let useWebp = toBool(process.env.WEBP)
+let inlineCss = toBool(process.env.INLINE_CSS)
+let replaceRobotsTxt = toBool(process.env.REPLACE_ROBOTS_TXT)
 
 module.exports = function webflowPlugin(){
 	let excludeFromSitemap = []
@@ -47,7 +65,7 @@ module.exports = function webflowPlugin(){
 
 		this.on(`parseHtml`, ({ $, url }) => {
 			const $body = $(`body`)
-			// const $head = $(`head`)
+			const $head = $(`head`)
 			const $html = $(`html`)
 
 			// Add lang attrbute
@@ -62,6 +80,12 @@ module.exports = function webflowPlugin(){
 
 			// Removes the "Powered by Webflow" link for paid accounts
 			$html.removeAttr(`data-wf-domain`)
+
+			// Remove generator meta tag
+			$head.find(`meta[name="generator"]`).remove()
+
+			// Add CryoLayer generator meta tag
+			$head.append(`<meta name="generator" content="CryoLayer" />`)
 
 			// Make webfonts.js async
 			// let webfontsJs = `{}`
@@ -137,41 +161,42 @@ module.exports = function webflowPlugin(){
 			const PUBLISH_DIR = join(process.cwd(), dist)
 
 			// Inline critical CSS
-			console.log(`Inlining critical CSS...`)
-			await inlineCriticalCss({
-				inputs: {
-					fileFilter: ['*.html'],
-					directoryFilter: ['!node_modules'],
-					minify: true,
-					extract: true,
-					dimensions: [
-						{
-							width: 414,
-							height: 896,
-						},
-						{
-							width: 1920,
-							height: 1080,
-						},
-					],
-				},
-				constants: {
-					PUBLISH_DIR,
-				},
-				utils: {
-					build: {
-						failBuild: (msg, { error }) => {
-							console.error(msg)
-							console.error(error)
-							process.exit(1)
+			if(inlineCss){
+				console.log(`Inlining critical CSS...`)
+				await inlineCriticalCss({
+					inputs: {
+						fileFilter: ['*.html'],
+						directoryFilter: ['!node_modules'],
+						minify: true,
+						extract: true,
+						dimensions: [
+							{
+								width: 414,
+								height: 896,
+							},
+							{
+								width: 1920,
+								height: 1080,
+							},
+						],
+					},
+					constants: {
+						PUBLISH_DIR,
+					},
+					utils: {
+						build: {
+							failBuild: (msg, { error }) => {
+								console.error(msg)
+								console.error(error)
+								// process.exit(1)
+							},
 						},
 					},
-				},
-			}).catch(err => {
-				console.error(err)
-				process.exit(1)
-			})
-			console.log(`Inlined critical CSS`)
+				}).catch(err => {
+					console.log(`ERROR`)
+					console.error(err)
+				})
+			}
 
 			// Optimize images
 			console.log(`Optimizing images...`)
@@ -179,18 +204,16 @@ module.exports = function webflowPlugin(){
 				constants: {
 					PUBLISH_DIR,
 				},
-			}).catch((err, { error }) => {
+			}).catch((err) => {
 				console.error(err)
-				console.error(error)
-				process.exit(1)
+				// process.exit(1)
 			})
-			console.log(`Optimized images`)
 			
 			
 
 			// Create robots.txt if it doesn't exist
-			const robotsExists = await exists(join(dist, `robots.txt`))
-			if (!robotsExists) {
+			const newRobotsTxt = replaceRobotsTxt || !(await exists(join(dist, `robots.txt`)))
+			if (newRobotsTxt) {
 				console.log(`Creating robots.txt...`)
 				await outputFile(join(dist, `robots.txt`), ``)
 			}
@@ -214,7 +237,7 @@ module.exports = function webflowPlugin(){
 
 				// Create webp images
 				console.log(`Creating webp images...`)
-				const images = await globby(`${dist}/**/*.{jpg,jpeg,png,gif}`)
+				const images = await globby(`${dist}/**/*.{jpg,jpeg,png,gif,JPG,JPEG,PNG,GIF}`)
 				for(let file of images){
 					const newPath = file + `.webp`
 					await webp.cwebp(file, newPath, `-q 90`)
@@ -269,4 +292,3 @@ module.exports = function webflowPlugin(){
 		})
 	}
 }
-
